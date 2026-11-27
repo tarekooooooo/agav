@@ -28,7 +28,8 @@ interface Props {
   onPaste?: (text: string, insertLabel: (label: string) => void) => void;
   /** Whether App is tracking a compact paste eligible for immediate-repeat expansion. */
   canExpandPaste?: boolean;
-  onRemoveAttachment?: () => void;
+  /** Called with the id of the attachment tile the user just deleted. */
+  onRemoveAttachment?: (id: number) => void;
   onClearAttachments?: () => void;
   /** Replace externally owned text without reporting it as a user edit. */
   onRegisterReplace?: (replace: (text: string, preserveCursor?: boolean) => void) => void;
@@ -121,11 +122,12 @@ export function isEscapeResidue(input: string): boolean {
 /**
  * The attachment tile grammar, immediately before the cursor, with its
  * trailing space. Shared with `ATTACHMENT_TILE_RE` from `utils/attachments.ts`
- * so backspace (which removes a whole tile at a stroke) and click (which
- * refuses to put the caret inside one) never disagree with how a tile was
- * actually built.
+ * so backspace and Forward Delete (which remove a whole tile at a stroke)
+ * and click (which refuses to put the caret inside one) never disagree
+ * with how a tile was actually built.
  */
 const ATTACHMENT_BEFORE_CURSOR_RE = new RegExp(ATTACHMENT_TILE_RE.source + " ?$");
+const ATTACHMENT_AT_CURSOR_RE = new RegExp("^" + ATTACHMENT_TILE_RE.source);
 
 
 /**
@@ -931,13 +933,13 @@ export default function InputPrompt({ value, onChange: emitValue, onSubmit, onPa
           return;
         }
         if (cursorPos > 0) {
-          // Check if cursor is right after an attachment label like "<<Pasted #1: ...>>"
+          // Check if cursor is right after an attachment label like "<<Pasted #1 · ...>>"
           const textBefore = value.slice(0, cursorPos);
           const labelMatch = textBefore.match(ATTACHMENT_BEFORE_CURSOR_RE);
           if (labelMatch && onRemoveAttachment) {
             const labelStart = cursorPos - labelMatch[0].length;
             applyEdit(value.slice(0, labelStart) + value.slice(cursorPos), labelStart);
-            onRemoveAttachment();
+            onRemoveAttachment(Number(labelMatch[1]));
           } else {
             const prev = prevGraphemeOffset(value, cursorPos);
             applyEdit(value.slice(0, prev) + value.slice(cursorPos), prev);
@@ -953,7 +955,10 @@ export default function InputPrompt({ value, onChange: emitValue, onSubmit, onPa
           return;
         }
         if (cursorPos < value.length) {
-          const next = nextGraphemeOffset(value, cursorPos);
+          // Cursor is right before an attachment tile: remove the whole tile.
+          const tileMatch = value.slice(cursorPos).match(ATTACHMENT_AT_CURSOR_RE);
+          if (tileMatch && onRemoveAttachment) onRemoveAttachment(Number(tileMatch[1]));
+          const next = tileMatch && onRemoveAttachment ? cursorPos + tileMatch[0].length + (value[cursorPos + tileMatch[0].length] === " " ? 1 : 0) : nextGraphemeOffset(value, cursorPos);
           applyEdit(value.slice(0, cursorPos) + value.slice(next), cursorPos);
           setSelectedSuggestion(0);
         }
