@@ -55,7 +55,7 @@ let currentValue = "";
 
 type HostOptions = Partial<Pick<
   Parameters<typeof InputPrompt>[0],
-  "commands" | "agentNames" | "readOnly" | "disabled" | "onSubmit"
+  "commands" | "agentNames" | "readOnly" | "disabled" | "onSubmit" | "onRemoveAttachment"
 >>;
 
 const Host = ({ initial, ...options }: { initial: string } & HostOptions) => {
@@ -418,5 +418,79 @@ describe("snapOutOfAttachment", () => {
     const imageStart = PASTE.length + 1;
     expect(snapOutOfAttachment(text, imageStart + 2)).toBe(imageStart);
     expect(snapOutOfAttachment(text, PASTE.length)).toBe(PASTE.length);
+  });
+});
+
+// Backspace after a tile and Forward Delete before one remove the whole tile
+// at a stroke, and report the tile's id so the matching queued attachment is
+// dropped with it — removing the first tile must not drop the last one.
+describe("backspace and delete on an attachment tile", () => {
+  const PASTE = "<<Pasted #1 · 2k chars, 40 lines>>";
+  const IMAGE = "<<Image #2 · 800x600>>";
+
+  it("removes the first tile with backspace and reports its id", async () => {
+    const onRemoveAttachment = vi.fn();
+    const { instance, stdin } = await mount(`${PASTE} ${IMAGE} `, { onRemoveAttachment });
+
+    // The start of the image tile, directly after the pasted tile and its space.
+    await clickAtOffset(instance, stdin, PASTE.length + 1);
+    await type(instance, stdin, "\x7f");
+
+    expect(currentValue).toBe(`${IMAGE} `);
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith(1);
+    instance.unmount();
+  });
+
+  it("removes the last tile with backspace and then the first", async () => {
+    const onRemoveAttachment = vi.fn();
+    const value = `${PASTE} ${IMAGE} `;
+    const { instance, stdin } = await mount(value, { onRemoveAttachment });
+
+    // Past the end of the text, so the caret lands at the end.
+    await clickAtOffset(instance, stdin, value.length);
+    await type(instance, stdin, "\x7f");
+
+    expect(currentValue).toBe(`${PASTE} `);
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith(2);
+
+    await type(instance, stdin, "\x7f");
+
+    expect(currentValue).toBe("");
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(2);
+    expect(onRemoveAttachment).toHaveBeenCalledWith(1);
+    instance.unmount();
+  });
+
+  it("removes the next tile with forward delete and reports its id", async () => {
+    const onRemoveAttachment = vi.fn();
+    const { instance, stdin } = await mount(`${PASTE} ${IMAGE} `, { onRemoveAttachment });
+
+    await clickAtOffset(instance, stdin, 0);
+    stdin.emit("data", Buffer.from("\x1b[3~"));
+    await settle(instance);
+
+    expect(currentValue).toBe(`${IMAGE} `);
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith(1);
+    instance.unmount();
+  });
+
+  it("leaves plain-text deletion unchanged", async () => {
+    const onRemoveAttachment = vi.fn();
+    const { instance, stdin } = await mount("hello", { onRemoveAttachment });
+
+    await clickAtOffset(instance, stdin, 5);
+    await type(instance, stdin, "\x7f");
+    expect(currentValue).toBe("hell");
+
+    await clickAtOffset(instance, stdin, 0);
+    stdin.emit("data", Buffer.from("\x1b[3~"));
+    await settle(instance);
+    expect(currentValue).toBe("ell");
+
+    expect(onRemoveAttachment).not.toHaveBeenCalled();
+    instance.unmount();
   });
 });
