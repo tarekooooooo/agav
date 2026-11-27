@@ -2191,10 +2191,11 @@ export default function App({ config: initialConfig, keybindings, resumeMessages
             onSubmit={handleSubmit}
             onPaste={handlePaste}
             canExpandPaste={lastPasteRef.current !== null}
-            onRemoveAttachment={() => {
+            onRemoveAttachment={(id) => {
               composerEditVersionRef.current++;
-              setAttachments((prev) => prev.slice(0, -1));
-              lastPasteRef.current = null;
+              setAttachments((prev) => prev.filter((a) => a.id !== id));
+              unregisterAttachment(id);
+              if (lastPasteRef.current?.attachmentId === id) lastPasteRef.current = null;
             }}
             onClearAttachments={() => {
               composerEditVersionRef.current++;
